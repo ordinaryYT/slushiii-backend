@@ -44,15 +44,35 @@ async function fetchLiveChatId(apiKey) {
   }
 }
 
-// Fetch the liveChatId at runtime when the app starts
-(async () => {
-  const apiKey = process.env.YOUTUBE_API_KEY; // Load from .env file
-  const liveChatId = await fetchLiveChatId(apiKey);
+// Global variable to store the active liveChatId
+let liveChatId = null;
+
+// Function to fetch liveChatId every 5 minutes
+setInterval(async () => {
+  const apiKey = process.env.YOUTUBE_API_KEY; // Get API key from .env file
+  liveChatId = await fetchLiveChatId(apiKey);
 
   if (liveChatId) {
     console.log('Active YouTube Live Chat ID:', liveChatId);
-    // You can save this liveChatId to a global variable or use it in your app
-  } else {
-    console.log('Failed to fetch liveChatId.');
+    // You can store the liveChatId in a database or memory if needed
+    // Example: saveToDatabase(liveChatId); // Or pass it to your frontend via an API endpoint
   }
-})();
+}, 300000); // 5 minutes (in milliseconds)
+
+// Example Express server to serve the liveChatId to your frontend
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 8080;
+
+// API endpoint to send liveChatId to frontend
+app.get('/api/live-chat-id', (req, res) => {
+  if (liveChatId) {
+    res.json({ liveChatId });
+  } else {
+    res.status(404).json({ message: 'No active live chat found.' });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
