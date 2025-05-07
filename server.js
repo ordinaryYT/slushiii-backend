@@ -1,62 +1,77 @@
+require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-require('dotenv').config();
-
 const app = express();
-const port = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3001;
 
-// Function to fetch live chat ID from YouTube
-async function fetchLiveChatId(apiKey) {
+let liveChatId = null;
+let cachedMessages = [];
+
+const fetchLiveChatId = async () => {
   try {
-    const broadcasts = await axios.get('https://www.googleapis.com/youtube/v3/liveBroadcasts', {
-      params: {
-        part: 'snippet',
-        broadcastStatus: 'active',
-        key: apiKey,
-      },
-    });
-
-    const broadcastId = broadcasts.data.items[0]?.id;
-    if (!broadcastId) {
-      console.log('❌ No active broadcast found.');
-      return null;
+    const res = await axios.get(
+      `https://www.googleapis.com/youtube/v3/liveBroadcasts`,
+      {
+        params: {
+          part: 'snippet',
+          broadcastStatus: 'active',
+          broadcastType: 'all',
+          key: process.env.YOUTUBE_API_KEY
+        }
+      }
+    );
+    const broadcast = res.data.items[0];
+    if (broadcast) {
+      const videoId = broadcast.id;
+      const videoRes = await axios.get(
+        `https://www.googleapis.com/youtube/v3/videos`,
+        {
+          params: {
+            part: 'liveStreamingDetails',
+            id: videoId,
+            key: process.env.YOUTUBE_API_KEY
+          }
+        }
+      );
+      liveChatId = videoRes.data.items[0]?.liveStreamingDetails?.activeLiveChatId;
     }
-
-    const videoDetails = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
-      params: {
-        part: 'liveStreamingDetails',
-        id: broadcastId,
-        key: apiKey,
-      },
-    });
-
-    const liveChatId = videoDetails.data.items[0]?.liveStreamingDetails?.activeLiveChatId;
-    if (liveChatId) {
-      console.log('✅ Found liveChatId:', liveChatId);
-      return liveChatId;
-    } else {
-      console.log('❌ No live chat ID found for the active broadcast.');
-      return null;
-    }
-  } catch (error) {
-    console.error('Error fetching liveChatId:', error);
-    return null;
+  } catch (err) {
+    console.error('Failed to fetch liveChatId', err.message);
   }
-}
+};
 
-// Endpoint to return liveChatId to the frontend
-app.get('/api/live-chat-id', async (req, res) => {
-  const apiKey = process.env.YOUTUBE_API_KEY; // Get from .env file
-  const liveChatId = await fetchLiveChatId(apiKey);
-
-  if (liveChatId) {
-    res.json({ liveChatId });
-  } else {
-    res.status(404).json({ message: 'No active live chat found.' });
+const fetchChatMessages = async () => {
+  if (!liveChatId) return;
+  try {
+    const res = await axios.get(
+      `https://www.googleapis.com/youtube/v3/liveChat/messages`,
+      {
+        params: {
+          part: 'snippet,authorDetails',
+          liveChatId,
+          key: process.env.YOUTUBE_API_KEY
+        }
+      }
+    );
+    cachedMessages = res.data.items.map(msg => ({
+      author: msg.authorDetails.displayName,
+      text: msg.snippet.displayMessage
+    }));
+  } catch (err) {
+    console.error('Failed to fetch chat messages', err.message);
   }
+};
+
+// Refresh chat ID & messages every 15 seconds
+setInterval(async () => {
+  if (!liveChatId) await fetchLiveChatId();
+  if (liveChatId) await fetchChatMessages();
+}, 15000);
+
+app.get('/chat/youtube', (req, res) => {
+  res.json(cachedMessages);
 });
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+app.listen(PORT, () => {
+  console.log(`YouTube chat backend running on port ${PORT}`);
 });
